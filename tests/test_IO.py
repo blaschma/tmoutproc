@@ -22,6 +22,28 @@ def test_read_write_xyz_file():
     assert coord_xyz.shape == coord_xyz_reread.shape
     assert np.max(np.abs(coord_xyz[1:3,:]-coord_xyz_reread[1:3,:])) == 0
 
+    coord_xyz[1,0] = 1.5E-5
+    top.write_xyz_file("/tmp/xyz.xyz", coord_xyz)
+    #test if second to fourth column in a line contains an "e"
+    found = False
+    with open("/tmp/xyz.xyz", "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            if "e-" in line:
+                found = True
+    assert found == True
+
+    top.write_xyz_file("/tmp/xyz.xyz", coord_xyz, suppress_sci_not=True)
+    #test if second to fourth column in a line contains an "e"
+    found = False
+    with open("/tmp/xyz.xyz", "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            print(line)
+            if "e-" in line:
+                found = True
+    assert found == False
+
 def test_read_write_coord_file():
 
     coord_PCP = top.read_coord_file("./tests/test_data/coord_PCP")
@@ -151,6 +173,17 @@ def test_read_mos_file():
     assert eigenvectors.shape == (46,46)
     assert eigenvectors[44,45] == 0.49650335243185E-01
 
+    eigenvalues_mos, eigenvectors_mos = top.read_mos_file("./tests/test_data/mos_O2")
+    fmat = top.read_packed_matrix("./tests/test_data/fmat_ao_cs_O2.dat", output="dense")
+    smat = top.read_packed_matrix("./tests/test_data/smat_ao_O2.dat", output="dense")
+    from scipy.linalg import eigh
+    eigvals, eigvecs = eigh(fmat, smat)
+    #check if eigenvalues are the same
+    assert np.max(np.abs(eigvals - eigenvalues_mos)) < 1E-5
+    #check if eigenvectors are the same
+    assert np.max(np.abs(np.abs(eigvecs)-np.abs(eigenvectors_mos))) < 1E-4
+
+
 def test_read_write_plot_data():
     array1 = np.linspace(0, 1, 100)
     array2 = np.linspace(4, 3, 100)
@@ -201,6 +234,7 @@ def test_read_write_plot_data():
     assert np.all([data[0,i] == compare[i] for i in range(0,data.shape[0])])
     data = top.read_plot_data("./tests/test_data/plot_data.dat", False, delimiter=",", skip_lines_beginning=2, skip_lines_end=2)
     assert data.shape == (7, 7-2)
+
 
 
 def test_read_g98_file():
@@ -329,6 +363,83 @@ def test_write_g98_file():
 
 
 
+
+
+def test_write_lammps_geo_data():
+    coord_xyz = top.read_xyz_file("./tests/test_data/benz.xyz")
+    output_file = "/tmp/lammps_geo_data.dat"
+    with pytest.raises(NotImplementedError):
+        top.write_lammps_geo_data(output_file, coord_xyz, units="not valid")
+    with pytest.raises(NotImplementedError):
+        top.write_lammps_geo_data(output_file, coord_xyz, atom_style="not valid")
+    with pytest.raises(ValueError):
+        top.write_lammps_geo_data(output_file, coord_xyz, xlo="n")
+    with pytest.raises(ValueError):
+        top.write_lammps_geo_data(output_file, coord_xyz, charges=[0.5,0.5])
+    top.write_lammps_geo_data(output_file, coord_xyz)
+
+    #read output file again and check number of lines
+    with open(output_file, "r") as f:
+        lines = f.readlines()
+    assert len(lines) == 28
+
+    charges = np.ones((coord_xyz.shape[1],1))
+    top.write_lammps_geo_data(output_file, coord_xyz, charges=charges)
+    with open(output_file, "r") as f:
+        lines = f.readlines()
+    assert len(lines) == 28
+
+def test_read_xyz_path_file():
+
+    filename = "./tests/test_data/benz_trj_without_E.xyz"
+    coord_xyz_path, energies = top.read_xyz_path_file(filename, return_header=True)
+    assert np.all([energies[i] == 0 for i in range(0,energies.shape[0])])
+
+    filename = "./tests/test_data/benz_trj.xyz"
+    filename_ref = "./tests/test_data/benz.xyz"
+    coord_xyz_path, energies = top.read_xyz_path_file(filename, return_header=True)
+    assert coord_xyz_path.shape == (3, 4, 12)
+    assert energies.shape == (3,)
+    assert energies[0] == 1
+    assert energies[1] == 5
+    assert energies[2] == 7
+
+
+
+    coord_xyz = top.read_xyz_file(filename_ref)
+    #compare coord_xyz_path with coord_xyz
+    test = [coord_xyz_path[0,0,i] == coord_xyz[0,i] for i in range(0,coord_xyz.shape[1])]
+    assert np.all(test)
+    assert np.max(np.abs(coord_xyz_path[0, 1, :] - coord_xyz[1, :])) == 0
+    assert np.max(np.abs(coord_xyz_path[0, 2, :] - coord_xyz[2, :])) == 0
+    assert np.max(np.abs(coord_xyz_path[0, 3, :] - coord_xyz[3, :])) == 0
+
+    coord_xyz_path = top.read_xyz_path_file(filename_ref)
+    assert coord_xyz_path.shape == (1, 4, 12)
+    with pytest.raises(ValueError):
+        top.read_xyz_path_file(filename_ref, start_geo=-1)
+    with pytest.raises(ValueError):
+        top.read_xyz_path_file(filename_ref, end_geo=500)
+    with pytest.raises(ValueError):
+        top.read_xyz_path_file(filename_ref, start_geo=1, end_geo=0)
+
+    coord_xyz_path = top.read_xyz_path_file(filename, start_geo=1, end_geo=2)
+    assert coord_xyz_path.shape == (1, 4, 12)
+    assert coord_xyz_path[0, 3, 0] == -1
+
+    coord_xyz_path = top.read_xyz_path_file(filename, start_geo=1, end_geo=3)
+    assert coord_xyz_path.shape == (2, 4, 12)
+    assert coord_xyz_path[0, 3, 0] == -1
+    assert coord_xyz_path[1, 3, 0] == -2
+
+    coord_xyz_path_without_range = top.read_xyz_path_file(filename, start_geo=0, end_geo=3)
+    coord_xyz_path = top.read_xyz_path_file(filename)
+    #check if coord_xyz_path_without_range is the same as coord_xyz_path. consider that one entry is string
+    test = [coord_xyz_path[0, 0, i] == coord_xyz_path_without_range[0, 0, i] for i in range(0, coord_xyz_path_without_range.shape[2])]
+    assert np.all(test)
+    assert np.max(np.abs(coord_xyz_path_without_range[0, 1, :] - coord_xyz_path[0, 1, :])) == 0
+    assert np.max(np.abs(coord_xyz_path_without_range[0, 2, :] - coord_xyz_path[0, 2, :])) == 0
+    assert np.max(np.abs(coord_xyz_path_without_range[0, 3, :] - coord_xyz_path[0, 3, :])) == 0
 
 
 
