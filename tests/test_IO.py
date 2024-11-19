@@ -235,6 +235,136 @@ def test_read_write_plot_data():
     data = top.read_plot_data("./tests/test_data/plot_data.dat", False, delimiter=",", skip_lines_beginning=2, skip_lines_end=2)
     assert data.shape == (7, 7-2)
 
+
+
+def test_read_g98_file():
+    modes = top.read_g98_file("./tests/test_data/g98_test.g98")
+
+    assert len(modes) == 5
+    freqs = []
+    red_masses = []
+    for mode in modes:
+        keys = mode.keys()
+        print(keys)
+        assert "coord_xyz" in keys
+        assert mode["coord_xyz"].shape == (4, 38)
+        assert "mode_xyz" in keys
+        assert mode["mode_xyz"].shape == (4, 38)
+        assert "frequency" in keys
+        freqs.append(mode["frequency"])
+        assert "red_mass" in keys
+        red_masses.append(mode["red_mass"])
+        assert "frc_const" in keys
+        assert "ir_intensity" in keys
+        assert "raman_activity" in keys
+        assert "depolarization_ratio" in keys
+
+    mode_xyz = modes[0]["mode_xyz"]
+    assert mode_xyz[0, 0] == "S"
+    ref = [-0.07,   0.04,  -0.00]
+    assert np.max(np.abs(np.array(mode_xyz[1:, 1]) - np.array(ref))) < 1e-12
+
+    ref_freqs = [11.7111, 13.8197, 14.1691, 32.4986, 32.6780]
+    assert np.max(np.abs(np.array(freqs)-np.array(ref_freqs))) < 1e-4
+    ref_red_masses = [20.7570, 10.4306, 10.0481,15.4042, 17.8718]
+    assert np.max(np.abs(np.array(red_masses)-np.array(ref_red_masses))) < 1e-4
+
+
+    with pytest.raises(AssertionError):
+        modes = top.read_g98_file("./tests/test_data/g98_test_faulty1.g98")
+
+    with pytest.raises(AssertionError):
+        modes = top.read_g98_file("./tests/test_data/g98_test_faulty2.g98")
+
+
+@pytest.fixture
+def setup_test_file():
+    """Fixture to set up and tear down the test file."""
+    filename = "./tests/test_data/test_nmd.nmd"
+    modes = [
+        {
+            "coord_xyz": np.array([["H", "O", "H"], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 2.0]]),
+            "mode_xyz": np.array([["H", "O", "H"], [0, 0, 0], [0.1, 0, 0], [-0.1, 0, 4.0]])
+        }
+    ]
+    yield filename, modes
+    if os.path.exists(filename):
+        os.remove(filename)
+
+
+def test_write_nmd_file(setup_test_file):
+    """Test writing to NMD file."""
+    filename, modes = setup_test_file
+    top.write_nmd_file(filename, modes, scale_with_mass=False)
+
+    # Check if the file was created
+    assert os.path.exists(filename)
+
+    with open(filename, 'r') as file:
+        lines = file.readlines()
+
+    # Check the content of the file
+    assert lines[0].strip() == "names H O H"
+    assert lines[1].strip() == "coordinates 0.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 2.0"
+    assert lines[2].strip() == "mode 0.0 0.1 -0.1 0.0 0.0 0.0 0.0 0.0 4.0"
+
+
+def test_read_nmd_file_invalid_format(setup_test_file):
+    """Test reading from an invalid NMD file."""
+    filename, _ = setup_test_file
+    with open(filename, 'w') as file:
+        file.write("invalid content\n")
+
+    read_modes = top.read_nmd_file(filename)
+
+    # Expecting no modes to be read due to invalid format
+    assert read_modes == []
+
+
+def test_read_nmd_file(setup_test_file):
+    """Test reading from NMD file."""
+    filename, modes = setup_test_file
+    top.write_nmd_file(filename, modes, scale_with_mass=False)
+
+    read_modes = top.read_nmd_file(filename)
+
+    # Check the content read from the file
+    assert len(read_modes) == 1
+    assert read_modes[0]["mode_xyz"].shape == modes[0]["mode_xyz"].shape
+    print(read_modes[0]["coord_xyz"][1:,], modes[0]["coord_xyz"][1:,])
+    assert np.array_equal(read_modes[0]["coord_xyz"][1:4,:].astype(float), modes[0]["coord_xyz"][1:4,:].astype(float))
+    assert np.array_equal(read_modes[0]["coord_xyz"][0, :], modes[0]["coord_xyz"][0, :])
+
+
+def test_write_g98_file():
+    modes = top.read_g98_file("./tests/test_data/g98_test.g98")
+
+    top.write_g98_file("/tmp/test.g98", modes)
+
+    modes_rewritten = top.read_g98_file("/tmp/test.g98")
+
+    assert len(modes) == len(modes_rewritten)
+    attributes_to_be_handled = ["frequency", "red_mass", "frc_const", "ir_intensity", "raman_activity","depolarization_ratio"]
+    for attr in attributes_to_be_handled:
+        mode_attr = [mode[attr] for mode in modes]
+        mode_attr_rewritten = [mode[attr] for mode in modes_rewritten]
+        assert np.allclose(mode_attr, mode_attr_rewritten)
+
+    attributes_to_be_handled = ["coord_xyz", "mode_xyz"]
+    for attr in attributes_to_be_handled:
+        for i, mode in enumerate(modes):
+            test = np.allclose(mode[f"{attr}"][1:4,:].astype(float), modes_rewritten[i][f"{attr}"][1:4,:].astype(float))
+            assert test
+            atoms_1 = mode["coord_xyz"][0,:]
+            atoms_2 = modes_rewritten[i]["coord_xyz"][0,:]
+            assert np.all([a1 == a2 for a1, a2 in zip(atoms_1, atoms_2)])
+
+
+
+
+
+
+
 def test_write_lammps_geo_data():
     coord_xyz = top.read_xyz_file("./tests/test_data/benz.xyz")
     output_file = "/tmp/lammps_geo_data.dat"
@@ -310,6 +440,7 @@ def test_read_xyz_path_file():
     assert np.max(np.abs(coord_xyz_path_without_range[0, 1, :] - coord_xyz_path[0, 1, :])) == 0
     assert np.max(np.abs(coord_xyz_path_without_range[0, 2, :] - coord_xyz_path[0, 2, :])) == 0
     assert np.max(np.abs(coord_xyz_path_without_range[0, 3, :] - coord_xyz_path[0, 3, :])) == 0
+
 
 
 

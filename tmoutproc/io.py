@@ -828,6 +828,384 @@ def read_from_flag_to_flag(control_path, flag, output_path, header="", footer=""
             output_file.write(f"{header}")
     return 0
 
+
+def read_g98_file(filepath):
+    """
+    Reads a Gaussian 98 output file and extracts the frequencies, red masses, frc consts,
+    IR intensities, Raman activities, and depolarization ratios.
+    Args:
+        filepath (str): Path to the *.g98 file
+    Returns:
+        list of dict: Properties of each mode, with keys:
+            - "coord_xyz": Coordinates as np.array
+            - "coode_xyz": displacements as np.array
+            - "frequency", "red_mass", "frc_const", "ir_intensity",
+              "raman_activity", "depolarization_ratio"
+    """
+
+
+
+    modepart_found = False
+    coord_part_found = False
+    part_length = -1
+    modes_parts = []
+    coord_parts = []
+
+    modes = []
+
+    #properties
+    frequencies = []
+    red_masses = []
+    frc_consts = []
+    ir_intensities = []
+    raman_activities = []
+    depolarization_ratios = []
+
+    def _read_file(filepath):
+        with open(filepath, encoding='utf-8') as file:
+            for line in file:
+                yield line
+
+    def _handle_mode_parts(modes_parts, frequencies, red_masses, frc_consts, ir_intensities, raman_activities, depolarization_ratios):
+        mode_parts = np.array(modes_parts, dtype="object")
+        n_modes = int((mode_parts.shape[1] - 2) / 3)
+
+        assert n_modes == len(
+            frequencies), f"Number of modes {n_modes} does not match number of frequencies {len(frequencies)}"
+        assert n_modes == len(
+            red_masses), f"Number of modes {n_modes} does not match number of red masses {len(red_masses)}"
+        assert n_modes == len(
+            frc_consts), f"Number of modes {n_modes} does not match number of frc consts {len(frc_consts)}"
+        assert n_modes == len(
+            ir_intensities), f"Number of modes {n_modes} does not match number of ir intensities {len(ir_intensities)}"
+        assert n_modes == len(
+            raman_activities), f"Number of modes {n_modes} does not match number of raman activities {len(raman_activities)}"
+        assert n_modes == len(
+            depolarization_ratios), f"Number of modes {n_modes} does not match number of depolarization ratios {len(depolarization_ratios)}"
+        modes = []
+        for mode in range(n_modes):
+            mode_xyz = mode_parts[:, 2 + mode * 3:2 + mode * 3 + 3]
+            # add atom type column to xyz
+            mode_xyz = np.column_stack((mode_parts[:, 1], mode_xyz))
+            mode_xyz[:, 1:4] = mode_xyz[:, 1:4].astype(float)
+            mode_xyz = np.array(mode_xyz, dtype="object")
+            mode_xyz = mode_xyz.T
+            assert mode_xyz.shape == coord_xyz.shape, "Mode and coord shapes do not match"
+            mode_xyz[0, :] = coord_xyz[0, :]
+
+            mode_dict = {
+                "coord_xyz": coord_xyz,
+                "mode_xyz": mode_xyz,
+                "frequency": frequencies[mode],
+                "red_mass": red_masses[mode],
+                "frc_const": frc_consts[mode],
+                "ir_intensity": ir_intensities[mode],
+                "raman_activity": raman_activities[mode],
+                "depolarization_ratio": depolarization_ratios[mode]
+            }
+
+            modes.append(mode_dict)
+        return modes
+
+    for line in _read_file(filepath):
+        #coords are specified (wildcards before and after)
+        if "coordinates" in line.lower() and "atomic" in line.lower():
+            coord_part_found = True
+            continue
+
+        #usually the coordinates are specified in the beginning
+        if coord_part_found == True:
+            try:
+                floats = line.strip().split()
+                floats = [float(i) for i in floats]
+                assert len(floats) == 6, "Coord specification is not correct"
+                coord_parts.append(floats)
+
+            except ValueError:
+                #coord part ready
+                if(len(coord_parts) > 0):
+                    coord_xyz = np.array(coord_parts)
+                    coord_xyz = np.column_stack((coord_xyz[:,1], coord_xyz[:,3:]))
+                    coord_xyz[:,1:4] = coord_xyz[:,1:4].astype(float)
+                    coord_xyz = np.array(coord_xyz, dtype="object")
+                    atom_types = [ATOM_DICT_ANUM[int(i)][0].capitalize() for i in coord_xyz[:, 0]]
+                    coord_xyz[:,0] = atom_types
+                    coord_xyz = coord_xyz.T
+                    coord_part_found = False
+                #coord part not started
+                else:
+                    continue
+
+
+        if r.match(r"\s*Frequencies", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    frequency = float(item)
+                    frequencies.append(frequency)
+                except ValueError:
+                    pass
+        if r.match(r"\s*Red. masses", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    red_mass = float(item)
+                    red_masses.append(red_mass)
+                except ValueError:
+                    pass
+        if r.match(r"\s*Frc consts", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    frc_const = float(item)
+                    frc_consts.append(frc_const)
+                except ValueError:
+                    pass
+        if r.match(r"\s*IR Inten", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    ir_intensity = float(item)
+                    ir_intensities.append(ir_intensity)
+                except ValueError:
+                    pass
+        if r.match(r"\s*Raman Activ", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    raman_activity = float(item)
+                    raman_activities.append(raman_activity)
+                except ValueError:
+                    pass
+        if r.match(r"\s*Depolar", line):
+            part = line.strip().split()
+            for item in part:
+                try:
+                    depolarization_ratio = float(item)
+                    depolarization_ratios.append(depolarization_ratio)
+                except ValueError:
+                    pass
+
+        #Description of modes starts
+        if r.match(r"\s*Atom", line) and len(frequencies) > 0:
+            modepart_found = True
+            continue
+        if modepart_found:
+            part = line.strip().split()
+            #mode part just starts -> implementation expects mode part longer than one atom
+            if(part_length == -1):
+                part_length = len(part)
+
+            #mode part is over
+            if(part_length != len(part)):
+                if len(part) != part_length:
+                    modes_ = _handle_mode_parts(modes_parts, frequencies, red_masses, frc_consts, ir_intensities, raman_activities, depolarization_ratios)
+                    modes.extend(modes_)
+
+                    modes_parts = []
+                    frequencies = []
+                    red_masses = []
+                    frc_consts = []
+                    ir_intensities = []
+                    raman_activities = []
+                    depolarization_ratios = []
+                    modepart_found = False
+                    part_length = -1
+
+            else:
+                modes_parts.append(part)
+    #if mode part end corresponds to end of file
+    if len(modes_parts) > 0:
+        modes_ = _handle_mode_parts(modes_parts, frequencies, red_masses, frc_consts, ir_intensities,
+                                    raman_activities, depolarization_ratios)
+        modes.extend(modes_)
+
+    return modes
+
+
+def write_nmd_file(filename, modes, scale_with_mass=False):
+    """
+    Write normal mode displacement file in VMDs normal wizard file format.
+
+    Args:
+        filename (str): Path to output file
+        modes (list of dict): Properties of each mode, with keys:
+            - "coord_xyz": Coordinates as np.array
+            - "mode_xyz": displacements as np.array
+        scale_with_mass (Boolean): If set to True, the displacements are scaled with the square root of the atomic masses
+
+
+    Returns:
+    """
+
+    with open(filename, "w") as file:
+        for i, mode in enumerate(modes):
+            coord_xyz = mode["coord_xyz"]
+            mode_xyz = mode["mode_xyz"]
+            scaling_factor = [1.0] * coord_xyz.shape[1]
+            if scale_with_mass:
+                masses = [ATOM_DICT_SYM[atom.lower()][2] for atom in coord_xyz[0, :]]
+                scaling_factor = 1 / np.sqrt(masses)
+
+            if (i == 0):
+                print(i)
+                atoms = [item.upper() for item in coord_xyz[0, :]]
+                # write atoms to file. separate by space
+                file.write("names " + " ".join(atoms) + "\n")
+                coordinates = [str(item) for sublist in coord_xyz[1:4, :].T for item in sublist]
+                file.write("coordinates " + " ".join(coordinates) + "\n")
+
+            mode_xyz[1:4, :] = np.asarray(mode_xyz[1:4, :], dtype='float64') * [scaling_factor, scaling_factor, scaling_factor]
+            displacements = [str(item) for sublist in mode_xyz[1:4, :].T for item in sublist]
+            file.write("mode " + " ".join(displacements) + "\n")
+
+def read_nmd_file(filename):
+    """
+    Read normal mode displacement file in VMDs normal wizard file format.
+
+    Args:
+        filename (str): Path to input file
+
+    Returns:
+        modes (list of dict): Properties of each mode, with keys:
+            - "coord_xyz": Coordinates as np.array
+            - "mode_xyz": displacements as np.array
+    """
+    modes = []
+
+    def _is_float(string):
+        try:
+            float(string)
+            return True
+        except ValueError:
+            return False
+
+    def _is_key(key, dict):
+        try:
+            dict[key]
+            return True
+        except KeyError:
+            return False
+
+    def _read_file(filepath):
+        with open(filepath, encoding='utf-8') as file:
+            for line in file:
+                yield line
+
+
+
+    for line in _read_file(filename):
+        if line.startswith("names"):
+            #exclude "names"
+            atoms = line.strip().split(" ")[1:]
+            atoms = [item.lower().capitalize() for item in atoms if _is_key(item.lower(), ATOM_DICT_SYM)]
+        elif line.startswith("coordinates"):
+            coordinates = line.strip().split(" ")[1:]
+            coordinates = [item for item in coordinates if _is_float(item)]
+            coordinates = np.array(coordinates, dtype=object).reshape(-1, 3).T
+            coordinates = np.vstack((np.array(atoms), coordinates))
+            coordinates[1:4, :] = coordinates[1:4, :].astype(float)
+        elif line.startswith("mode"):
+            displacements = line.strip().split(" ")[1:]
+            displacements = [item for item in displacements if _is_float(item)]
+            displacements = np.array(displacements, dtype=object).reshape(-1, 3).T
+            #add first line with atoms to modes
+            displacements = np.vstack((np.array(atoms), displacements))
+            displacements[1:4, :] = displacements[1:4, :].astype(float)
+            assert coordinates.shape == displacements.shape, "Coordinates and displacements do not have the same shape"
+            mode = {"coord_xyz": coordinates, "mode_xyz": displacements}
+            modes.append(mode)
+    return modes
+
+def write_g98_file(filename, modes, decimal_places=2):
+    """
+    Write normal mode displacement file in Gaussian 98 format.
+
+    Args:
+        filename (str): Path to output file
+        modes (list of dict): Properties of each mode, with keys:
+            - "coord_xyz": Coordinates as np.array
+            - "mode_xyz": displacements as np.array
+            - "frequency": Frequency of the mode (if not given it is set to 0)
+            - "red_mass": Reduced mass of the mode (if not given it is set to 0)
+            - "frc_const": Force constant of the mode (if not given it is set to 0)
+            - "ir_intensity": IR intensity of the mode (if not given it is set to 0)
+            - "raman_activity": Raman activity of the mode (if not given it is set to 0)
+            - "depolarization_ratio": Depolarization ratio of the mode (if not given it is set to 0)
+        decimal_places (int): Number of decimal places for the coordinates
+
+
+    Returns:
+    """
+    coord_part_written = False
+    try:
+        mode_freqs = [mode["frequency"] for mode in modes]
+        #sort modes by frequency
+        modes = [mode for _, mode in sorted(zip(mode_freqs, modes), key=lambda pair: pair[0])]
+    except KeyError:
+        print("Waring: No frequencies found in modes. Writing file without frequencies.")
+
+
+    with open(filename, "w") as file:
+        i = 0
+        while i < len(modes)-1:
+            coord_xyz = modes[i]["coord_xyz"]
+            print("beginning" + str(i))
+            if not coord_part_written:
+                file.write(f"Entering Gaussian System\n")
+                file.write("*" * 46 + "\n")
+                file.write(f"Gaussian 98\n")
+                file.write(f"frequency output generated by tmoutproc\n")
+                file.write("*" * 46 + "\n")
+                file.write("                         Standard orientation:\n")
+                file.write(
+                    "----------------------------------------------------------------------\n"
+                    "  Center     Atomic     Atomic              Coordinates (Angstroms)\n"
+                    "  Number     Number      Type              X           Y           Z\n"
+                    "----------------------------------------------------------------------\n"
+                )
+                for j in range(0,coord_xyz.shape[1]):
+                    atomic_number = ATOM_DICT_SYM[coord_xyz[0, j].lower()][0]
+                    atomic_type = 0
+                    x_coord = coord_xyz[1, j]
+                    y_coord = coord_xyz[2, j]
+                    z_coord = coord_xyz[3, j]
+                    file.write(
+                        f"{j+1:>8}{atomic_number:>10}{atomic_type:>12}{x_coord:>16.6f}{y_coord:>12.6f}{z_coord:>12.6f}\n")
+                file.write("-" * 68 + "\n")
+                file.write("     1 basis functions        1 primitive gaussians\n")
+                file.write("     1 alpha electrons        1 beta electrons\n")
+                file.write("\n Harmonic frequencies (cm**-1), IR intensities (km*mol**-1) \n")
+                file.write("Raman scattering activities (A**4/amu), Raman depolarization ratios, \n")
+                file.write("reduced masses (AMU), force constants (mDyne/A) and normal coordinates:\n")
+            coord_part_written = True
+
+            n_freqs_to_handle = np.min([len(modes) - i,3])
+            tmp_modes = modes[i:i+n_freqs_to_handle]
+            tmp_disp = [mode["mode_xyz"] for mode in tmp_modes]
+            modes_to_be_written = np.arange(i, i+n_freqs_to_handle)
+            file.write(" "*15 + "".join(f"{n+1:<23}" for n in modes_to_be_written) + "\n")
+            tmp = "a"
+            file.write(" " * 15 + "".join(f"{tmp:<23}" for n in modes_to_be_written) + "\n")
+
+            attributes_to_be_handled = ["frequency", "red_mass", "frc_const", "ir_intensity", "raman_activity", "depolarization_ratio"]
+            labels = ["Frequencies --", "Red. masses --", "Frc consts  --", "IR Inten    --", "Raman Activ --", "Depolar     --"]
+            for u, attr in enumerate(attributes_to_be_handled):
+                try:
+                    attributes = [mode[attr] for mode in tmp_modes]
+                except KeyError:
+                    attributes = [0.0] * n_freqs_to_handle
+                file.write(f" {labels[u]}   " + "".join(f"{attr:<20}" for attr in attributes) + "\n")
+            header = "Atom AN      " + "      ".join(["X", "Y", "Z"] * n_freqs_to_handle) + "\n"
+            file.write(header)
+            for j in range(0, coord_xyz.shape[1]):
+                atomic_number = ATOM_DICT_SYM[coord_xyz[0, j].lower()][0]
+                coords = [disp[1:4,j] for disp in tmp_disp]
+                coords = [item for sublist in coords for item in sublist]
+                file.write(f"{j+1:<4}{atomic_number:<8}" + "".join(f"{coord:<8.{decimal_places}f}" for coord in coords) + "\n")
+
+            i += n_freqs_to_handle
+
 def write_lammps_geo_data(filename, coord_xyz, xlo=0, xhi=0, ylo=0, yhi=0, zlo=0, zhi=0, charges=None, units="real", atom_style="full", header=""):
     """
     Writes xyz coordinates to lammps geometry data file. Right now only units real and atom_style full are supported.
@@ -911,6 +1289,7 @@ def write_lammps_geo_data(filename, coord_xyz, xlo=0, xhi=0, ylo=0, yhi=0, zlo=0
                 output_file.write(f"{i+1} {i+1} {atom_type_keys[coord_xyz[0,i]]}  {charge} {coord_xyz[1,i]} {coord_xyz[2,i]} {coord_xyz[3,i]}\n")
             else:
                 output_file.write(f"{i+1} {i+1} {atom_type_keys[coord_xyz[0,i]]}  {charges[i]} {coord_xyz[1,i]} {coord_xyz[2,i]} {coord_xyz[3,i]}\n")
+
 
 
 
