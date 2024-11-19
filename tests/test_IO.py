@@ -298,7 +298,32 @@ def test_read_nmd_file(setup_test_file):
     assert len(read_modes) == 1
     assert read_modes[0]["mode_xyz"].shape == modes[0]["mode_xyz"].shape
     print(read_modes[0]["coord_xyz"][1:,], modes[0]["coord_xyz"][1:,])
-    assert np.array_equal(read_modes[0]["coord_xyz"], modes[0]["coord_xyz"])
+    assert np.array_equal(read_modes[0]["coord_xyz"][1:4,:].astype(float), modes[0]["coord_xyz"][1:4,:].astype(float))
+    assert np.array_equal(read_modes[0]["coord_xyz"][0, :], modes[0]["coord_xyz"][0, :])
+
+
+def test_write_g98_file():
+    modes = top.read_g98_file("./tests/test_data/g98_test.g98")
+
+    top.write_g98_file("/tmp/test.g98", modes)
+
+    modes_rewritten = top.read_g98_file("/tmp/test.g98")
+
+    assert len(modes) == len(modes_rewritten)
+    attributes_to_be_handled = ["frequency", "red_mass", "frc_const", "ir_intensity", "raman_activity","depolarization_ratio"]
+    for attr in attributes_to_be_handled:
+        mode_attr = [mode[attr] for mode in modes]
+        mode_attr_rewritten = [mode[attr] for mode in modes_rewritten]
+        assert np.allclose(mode_attr, mode_attr_rewritten)
+
+    attributes_to_be_handled = ["coord_xyz", "mode_xyz"]
+    for attr in attributes_to_be_handled:
+        for i, mode in enumerate(modes):
+            test = np.allclose(mode[f"{attr}"][1:4,:].astype(float), modes_rewritten[i][f"{attr}"][1:4,:].astype(float))
+            assert test
+            atoms_1 = mode["coord_xyz"][0,:]
+            atoms_2 = modes_rewritten[i]["coord_xyz"][0,:]
+            assert np.all([a1 == a2 for a1, a2 in zip(atoms_1, atoms_2)])
 
 
 
