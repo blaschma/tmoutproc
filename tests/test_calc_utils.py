@@ -19,7 +19,17 @@ def test_create_dynamical_matrix():
     assert np.isclose(dyn_matrix[0, 1], -0.0000014025 / h_weight)
     assert np.max(np.abs(dyn_matrix - np.transpose(dyn_matrix))) == 0
 
+def test_lagrangian():
+    test_data_path= "./tests/test_data/"
+    dyn_matrix = top.create_dynamical_matrix(f"{test_data_path}/hessian_xtb", f"{test_data_path}/coord_h2", t2SI=False, dimensions=3)
+    K = dyn_matrix.copy()
+    delta = 1
+    K[2, 2] += delta
+    K = top.lagrangian(K, dimension=3)
 
+    assert np.allclose(dyn_matrix, K, atol=1e-3)
+    assert np.abs(np.sum(dyn_matrix - K)) < 1e-8
+    assert K.shape == dyn_matrix.shape
 
 def test_determine_n_orbitals():
     #test if basis set is checked
