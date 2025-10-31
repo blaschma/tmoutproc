@@ -83,5 +83,3 @@ def test_atom_type_to_atomic_number():
         top.atom_type_to_atomic_number("NotValid")
 
 
-test_lagrangian()
-
