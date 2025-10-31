@@ -10,6 +10,85 @@ from . import io as io
 
 __ang2bohr__ = 1.88973
 
+def lagrangian(K, dimension=3):
+    '''
+    Lagrange-multiplier formalism to adjust force-constant matrix K in a way to fulfill the acoustic sum rule ASR. 
+    The method is implemented according to:
+    N. Mingo, D. A. Stewart, D. A. Broido and D. Srivastava, "Phonon transmission through defects in carbon nanotubes from first principles", 
+    PHYSICAL REVIEW B 77, 033418 2008
+    DOI: 10.1103/PhysRevB.77.033418
+    '''
+
+    def extract_displacement_modes(K, dimension):
+        eigenvalues, eigenvectors = np.linalg.eigh(K)
+        sorted_indices = np.argsort(eigenvalues)
+
+        if dimension == 3:
+            R = eigenvectors[:, sorted_indices[:6]].T 
+        elif dimension == 2:
+            R = eigenvectors[:, sorted_indices[:2]].T
+        elif dimension == 1:
+            R = eigenvectors[:, sorted_indices[:1]].T 
+
+        return R 
+
+    def calculate_B(K, R):
+        n_constraints = R.shape[0]
+        n_rows = K.shape[0]
+        
+        K_sqr = K**2
+        term1_partial = np.einsum('ik, mk, nk -> nmi', K_sqr, R, R, optimize=True)
+        
+        B_term1 = np.zeros((n_constraints, n_constraints, n_rows, n_rows))
+        for n in range(n_constraints):
+            for m in range(n_constraints):
+                np.fill_diagonal(B_term1[n, m, :, :], term1_partial[n, m, :])
+        
+        B_term1 *= 0.25
+        B_term2 = 0.25 * np.einsum('mi, nj, ij -> nmij', R, R, K_sqr, optimize=True)
+        
+        B = B_term1 + B_term2
+        return B 
+
+    def calculate_a(K, R):
+        a = -np.einsum('ik, mk -> mi', K, R, optimize=True)
+        return a 
+
+    def solve_lagrange_multipliers(B, a):
+
+        n_constraints, n_rows = a.shape 
+        size = n_constraints * n_rows
+        B_full = B.transpose(0, 2, 1, 3).reshape(size, size)
+        
+        a_flat = a.reshape((size,)) 
+        lambda_full = np.linalg.lstsq(B_full, a_flat, rcond=None)[0] 
+        
+        lambda_reshaped = lambda_full.reshape(n_constraints, n_rows)
+
+        return lambda_reshaped 
+
+    def calculate_D(K, R, lambda_):
+        K_sqr = K**2
+    
+        term1_partial = np.einsum('mi, mj -> ij', lambda_, R, optimize=True)
+        D_term1 = 0.25 * K_sqr * term1_partial
+
+        term2_partial = np.einsum('mj, mi -> ij', lambda_, R, optimize=True)
+        D_term2 = 0.25 * K_sqr * term2_partial
+        
+        D = D_term1 + D_term2
+        
+        return D 
+
+    R = extract_displacement_modes(K, dimension)
+    B = calculate_B(K, R)
+    a = calculate_a(K, R)
+    lambda_ = solve_lagrange_multipliers(B, a)
+    D = calculate_D(K, R, lambda_)
+    
+    return K + D
+
+
 def create_dynamical_matrix(filename_hessian, filename_coord, t2SI=False, dimensions=3):
     """
     Creates dynamical matrix by mass weighting hessian. Input units are hartree/bohr**2.1 Default output in turbomole format (hartree/(bohr**2*u))
