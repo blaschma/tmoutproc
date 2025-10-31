@@ -31,7 +31,7 @@ def test_lagrangian():
     K_new = top.lagrangian(K, dimension=dim)
 
     assert np.abs(np.sum(K_new)) > 1e-10
-    assert K.shape == dyn_matrix.shape
+    assert K_new.shape == dyn_matrix.shape
 
 def test_determine_n_orbitals():
     #test if basis set is checked
