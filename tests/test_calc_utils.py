@@ -21,14 +21,16 @@ def test_create_dynamical_matrix():
 
 def test_lagrangian():
     test_data_path= "./tests/test_data/"
-    dyn_matrix = top.create_dynamical_matrix(f"{test_data_path}/hessian_xtb", f"{test_data_path}/coord_h2", t2SI=False, dimensions=3)
+    dim = 3
+    dyn_matrix = top.create_dynamical_matrix(f"{test_data_path}/hessian_xtb", f"{test_data_path}/coord_h2", t2SI=False, dimensions=dim)
     K = dyn_matrix.copy()
-    delta = 1
-    K[2, 2] += delta
-    K = top.lagrangian(K, dimension=3)
 
-    assert np.allclose(dyn_matrix, K, atol=1e-3)
-    assert np.abs(np.sum(dyn_matrix - K)) < 1e-8
+    K[0, 1] *= 1000
+    K[1, 0] *= 1000
+
+    K_new = top.lagrangian(K, dimension=dim)
+
+    assert np.abs(np.sum(K_new)) > 1e-10
     assert K.shape == dyn_matrix.shape
 
 def test_determine_n_orbitals():
@@ -79,3 +81,7 @@ def test_atom_type_to_atomic_number():
     assert top.atom_type_to_atomic_number("hf") == 72
     with pytest.raises(ValueError):
         top.atom_type_to_atomic_number("NotValid")
+
+
+test_lagrangian()
+

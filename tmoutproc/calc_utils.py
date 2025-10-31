@@ -17,71 +17,68 @@ def lagrangian(K, dimension=3):
     N. Mingo, D. A. Stewart, D. A. Broido and D. Srivastava, "Phonon transmission through defects in carbon nanotubes from first principles", 
     PHYSICAL REVIEW B 77, 033418 2008
     DOI: 10.1103/PhysRevB.77.033418
-
-    Args:
-        param1 (np.ndarray) : Force constant matrix
-        param2 (int) : Number of dimensions
-
-    Returns:
-        np.ndarray
     '''
-    
-    def extract_displacement_modes(K, dimension):
 
+    def extract_displacement_modes(K, dimension):
         eigenvalues, eigenvectors = np.linalg.eigh(K)
         sorted_indices = np.argsort(eigenvalues)
-        
+
         if dimension == 3:
-            R = eigenvectors[:, sorted_indices[:6]].T
+            R = eigenvectors[:, sorted_indices[:6]].T 
         elif dimension == 2:
-            R = eigenvectors[:, sorted_indices[:3]].T
+            R = eigenvectors[:, sorted_indices[:2]].T
         elif dimension == 1:
             R = eigenvectors[:, sorted_indices[:1]].T 
 
-        return R
+        return R 
 
     def calculate_B(K, R):
-        K_sq = K * K
-        term1_sum = 0.25 * np.einsum('ik, mk, nk -> inm', K_sq, R, R, optimize=True)
-        n_rows = K.shape[0]
         n_constraints = R.shape[0]
-        B_term1 = np.zeros((n_constraints, n_constraints, n_rows, n_rows))
-
-        for i in range(n_rows):
-            B_term1[:, :, i, i] = term1_sum[i, :, :]
-    
-        term2 = 0.25 * np.einsum('mi, nj, ij -> nmij', R, R, K_sq, optimize=True)
-        B_term2 = term2.transpose(1, 0, 2, 3)
+        n_rows = K.shape[0]
         
-        return B_term1 + B_term2
+        K_sqr = K**2
+        term1_partial = np.einsum('ik, mk, nk -> nmi', K_sqr, R, R, optimize=True)
+        
+        B_term1 = np.zeros((n_constraints, n_constraints, n_rows, n_rows))
+        for n in range(n_constraints):
+            for m in range(n_constraints):
+                np.fill_diagonal(B_term1[n, m, :, :], term1_partial[n, m, :])
+        
+        B_term1 *= 0.25
+        B_term2 = 0.25 * np.einsum('mi, nj, ij -> nmij', R, R, K_sqr, optimize=True)
+        
+        B = B_term1 + B_term2
+        return B 
 
     def calculate_a(K, R):
-        a = -np.einsum('ij, mj -> im', K, R, optimize=True)
-        
-        return a
+        a = -np.einsum('ik, mk -> mi', K, R, optimize=True)
+        return a 
 
     def solve_lagrange_multipliers(B, a):
-        n_constraints, n_rows = a.shape
-        B_full = B.transpose(2, 0, 3, 1).reshape(n_rows * n_constraints, n_rows * n_constraints)
-        a_flat_correct = a.reshape((n_constraints * n_rows,))
+
+        n_constraints, n_rows = a.shape 
+        size = n_constraints * n_rows
+        B_full = B.transpose(0, 2, 1, 3).reshape(size, size)
         
-        try:
-            lambda_full = np.linalg.solve(B_full, a_flat_correct)
-        except np.linalg.LinAlgError:
-            lambda_full = np.linalg.lstsq(B_full, a_flat_correct, rcond=None)[0]
-    
+        a_flat = a.reshape((size,)) 
+        lambda_full = np.linalg.lstsq(B_full, a_flat, rcond=None)[0] 
+        
         lambda_reshaped = lambda_full.reshape(n_constraints, n_rows)
 
-        return lambda_reshaped
+        return lambda_reshaped 
 
     def calculate_D(K, R, lambda_):
-        term1_sum = np.einsum('mi, mj -> ij', lambda_, R, optimize=True)
-        term2_sum = term1_sum.T
-        sum_of_sums = term1_sum + term2_sum
-        K_sq = K * K
-        D = 0.25 * K_sq * sum_of_sums
+        K_sqr = K**2
+    
+        term1_partial = np.einsum('mi, mj -> ij', lambda_, R, optimize=True)
+        D_term1 = 0.25 * K_sqr * term1_partial
+
+        term2_partial = np.einsum('mj, mi -> ij', lambda_, R, optimize=True)
+        D_term2 = 0.25 * K_sqr * term2_partial
         
-        return D
+        D = D_term1 + D_term2
+        
+        return D 
 
     R = extract_displacement_modes(K, dimension)
     B = calculate_B(K, R)
@@ -90,6 +87,7 @@ def lagrangian(K, dimension=3):
     D = calculate_D(K, R, lambda_)
     
     return K + D
+
 
 def create_dynamical_matrix(filename_hessian, filename_coord, t2SI=False, dimensions=3):
     """
