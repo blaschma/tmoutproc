@@ -30,7 +30,7 @@ def test_lagrangian():
 
     K_new = top.lagrangian(K, dimension=dim)
 
-    assert np.abs(np.sum(K_new)) > 1e-10
+    assert np.abs(np.sum(K_new)) < 1e-10
     assert K_new.shape == dyn_matrix.shape
 
 def test_determine_n_orbitals():
@@ -81,5 +81,3 @@ def test_atom_type_to_atomic_number():
     assert top.atom_type_to_atomic_number("hf") == 72
     with pytest.raises(ValueError):
         top.atom_type_to_atomic_number("NotValid")
-
-
